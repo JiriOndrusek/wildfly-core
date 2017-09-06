@@ -27,12 +27,14 @@ import static org.jboss.as.remoting.Protocol.REMOTE_HTTP;
 import static org.jboss.as.remoting.Protocol.REMOTE_HTTPS;
 
 import java.io.IOException;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 import io.undertow.server.ListenerRegistry;
 import io.undertow.server.handlers.ChannelUpgradeHandler;
 
 import org.jboss.as.controller.OperationContext;
+import org.jboss.as.controller.logging.ControllerLogger;
 import org.jboss.as.network.SocketBinding;
 import org.jboss.as.remoting.logging.RemotingLogger;
 import org.jboss.msc.service.Service;
@@ -95,20 +97,35 @@ public class RemotingHttpUpgradeService implements Service<RemotingHttpUpgradeSe
     private final InjectedValue<org.jboss.as.domain.management.SecurityRealm> injectedSecurityRealm = new InjectedValue<>();
     private final InjectedValue<SaslAuthenticationFactory> injectedSaslAuthenticationFactory = new InjectedValue<>();
     private final OptionMap connectorPropertiesOptionMap;
+    private final boolean validateDuplicity;
+    private final String saslAuthenticationFactory, securityRealm;
 
     private ListenerRegistry.HttpUpgradeMetadata httpUpgradeMetadata;
 
     public RemotingHttpUpgradeService(final String httpConnectorName, final String endpointName, final OptionMap connectorPropertiesOptionMap) {
+        this(httpConnectorName, endpointName, connectorPropertiesOptionMap, false, null, null);
+    }
+
+    public RemotingHttpUpgradeService(final String httpConnectorName, final String endpointName, final OptionMap connectorPropertiesOptionMap, final boolean validateDuplicity, final String saslAuthenticationFactory, final String securityRealm) {
         this.httpConnectorName = httpConnectorName;
         this.endpointName = endpointName;
         this.connectorPropertiesOptionMap = connectorPropertiesOptionMap;
+        this.validateDuplicity = validateDuplicity;
+        this.saslAuthenticationFactory = saslAuthenticationFactory;
+        this.securityRealm = securityRealm;
     }
 
 
     public static void installServices(final OperationContext context, final String remotingConnectorName, final String httpConnectorName, final ServiceName endpointName,
             final OptionMap connectorPropertiesOptionMap, final String securityRealm, final String saslAuthenticationFactory) {
+        installServices(context, remotingConnectorName, httpConnectorName, endpointName, connectorPropertiesOptionMap, securityRealm, saslAuthenticationFactory, false);
+    }
+
+
+    public static void installServices(final OperationContext context, final String remotingConnectorName, final String httpConnectorName, final ServiceName endpointName,
+            final OptionMap connectorPropertiesOptionMap, final String securityRealm, final String saslAuthenticationFactory, final boolean validateDuplicity) {
         ServiceTarget serviceTarget = context.getServiceTarget();
-        final RemotingHttpUpgradeService service = new RemotingHttpUpgradeService(httpConnectorName, endpointName.getSimpleName(), connectorPropertiesOptionMap);
+        final RemotingHttpUpgradeService service = new RemotingHttpUpgradeService(httpConnectorName, endpointName.getSimpleName(), connectorPropertiesOptionMap, validateDuplicity, saslAuthenticationFactory, securityRealm);
 
         ServiceBuilder<RemotingHttpUpgradeService> serviceBuilder = serviceTarget.addService(UPGRADE_SERVICE_NAME.append(remotingConnectorName), service)
                 .setInitialMode(ServiceController.Mode.PASSIVE)
@@ -139,7 +156,17 @@ public class RemotingHttpUpgradeService implements Service<RemotingHttpUpgradeSe
 
         ListenerRegistry.Listener listenerInfo = listenerRegistry.getValue().getListener(httpConnectorName);
         assert listenerInfo != null;
-        listenerInfo.addHttpUpgradeMetadata(httpUpgradeMetadata = new ListenerRegistry.HttpUpgradeMetadata("jboss-remoting", endpointName));
+
+        if(validateDuplicity) {
+            validateDuplicity(listenerInfo);
+        }
+
+        httpUpgradeMetadata = new ListenerRegistry.HttpUpgradeMetadata("jboss-remoting", endpointName);
+        //FIXME don't use metadata, find values in existing services
+        if(this.saslAuthenticationFactory != null) httpUpgradeMetadata.setContextInformation("saslAuthenticationFactory", this.saslAuthenticationFactory);
+        if(this.securityRealm != null) httpUpgradeMetadata.setContextInformation("securityRealm", this.securityRealm);
+
+        listenerInfo.addHttpUpgradeMetadata(httpUpgradeMetadata);
         RemotingConnectorBindingInfoService.install(context.getChildTarget(), context.getController().getName().getSimpleName(), (SocketBinding)listenerInfo.getContextInformation("socket-binding"), listenerInfo.getProtocol().equals("https") ? REMOTE_HTTPS : REMOTE_HTTP);
 
         if (connectorPropertiesOptionMap != null) {
@@ -189,6 +216,17 @@ public class RemotingHttpUpgradeService implements Service<RemotingHttpUpgradeSe
             throw new StartException(e);
         } catch (IOException e) {
             throw new StartException(e);
+        }
+    }
+
+    private void validateDuplicity(ListenerRegistry.Listener listenerInfo) {
+        for(ListenerRegistry.HttpUpgradeMetadata metadata : listenerInfo.getHttpUpgradeMetadata()) {
+            //FIXME don't use metadata, find values in existing services
+            if(Objects.equals(metadata.getContextInformation("saslAuthenticationFactory"), saslAuthenticationFactory) &&
+                Objects.equals(metadata.getContextInformation("securityRealm"), securityRealm)) {
+                //FIXME better message
+            throw ControllerLogger.ROOT_LOGGER.duplicateResource("http-connector");
+            }
         }
     }
 
