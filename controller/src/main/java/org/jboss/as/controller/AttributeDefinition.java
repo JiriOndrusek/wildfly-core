@@ -1324,18 +1324,8 @@ public abstract class AttributeDefinition {
         @Override
         public int compareTo(NameAndGroup o) {
 
-            if (group == null) {
-                if (o.group != null) {
-                    return -1;
-                }
-            } else if (o.group == null) {
-                return 1;
-            } else {
-                int groupComp = group.compareTo(o.group);
-                if (groupComp != 0) {
-                    return groupComp;
-                }
-            }
+            //fix of WFCORE-1985 - attributes have to be sorted firstly by name
+            //case that two attributes of the same name are allowed is not possible, see error WFLYCTL0043
             return name.compareTo(o.name);
         }
 
