@@ -108,7 +108,7 @@ public class PropertiesCallbackHandler extends UserPropertiesFileLoader implemen
      */
 
     public AuthMechanism getPreferredMechanism() {
-        return AuthMechanism.DIGEST;
+        return AuthMechanism.PLAIN; //todo jondruse
     }
 
     public Set<AuthMechanism> getSupplementaryMechanisms() {
