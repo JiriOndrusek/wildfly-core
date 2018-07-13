@@ -590,7 +590,7 @@ public class SecurityRealmService implements Service<SecurityRealm>, SecurityRea
 
             for(Iterator<String> iter = requestedMechanisms.iterator();iter.hasNext();) {
                 AuthMechanism authMechanism = toAuthMechanism("SASL", iter.next());
-                if(authMechanism != null && (registeredServices.containsKey(authMechanism) ||(authMechanism == AuthMechanism.PLAIN && registeredServices.containsKey(AuthMechanism.DIGEST)))) {
+                if(authMechanism != null && (registeredServices.containsKey(authMechanism) || registeredServices.containsKey(AuthMechanism.DIGEST))) {
                    iter.remove();
                 }
             }
@@ -637,7 +637,7 @@ public class SecurityRealmService implements Service<SecurityRealm>, SecurityRea
 
                     //preferred mechanism
                     String preferredMechanism;
-                    if(authMechanism == AuthMechanism.PLAIN && !registeredServices.containsKey(AuthMechanism.PLAIN) && registeredServices.containsKey(AuthMechanism.DIGEST)) {
+                    if(!registeredServices.containsKey(mechanismName)) {
                         preferredMechanism = AuthMechanism.DIGEST.name();
                     } else {
                         preferredMechanism = mechanismName;
