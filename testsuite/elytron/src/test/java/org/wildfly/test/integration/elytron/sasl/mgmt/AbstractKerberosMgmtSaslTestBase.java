@@ -30,6 +30,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.MalformedURLException;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.GeneralSecurityException;
@@ -352,19 +353,32 @@ public abstract class AbstractKerberosMgmtSaslTestBase {
         if (message == null) {
             message = "The failure of :whoami operation execution was expected, but the call passed";
         }
-        final long startTime = System.currentTimeMillis();
-        try {
-            executeWhoAmI(withTls);
-            fail(message);
-        } catch (IOException | GeneralSecurityException e) {
-            assertTrue("Connection reached its timeout (hang).",
-                    startTime + CONNECTION_TIMEOUT_IN_MS > System.currentTimeMillis());
-            Throwable cause = e.getCause();
-            assertThat("ConnectionException was expected as a cause when authentication fails", cause,
-                    is(instanceOf(ConnectException.class)));
-            assertThat("Unexpected type of inherited exception for authentication failure", cause.getCause(),
-                    anyOf(is(instanceOf(SSLException.class)), is(instanceOf(SaslException.class)),
-                            is(instanceOf(RedirectException.class))));
+        //there is a bug in sslEngine causing, that sometimes (<1%, see https://issues.jboss.org/browse/JBEAP-12835) execution ends with ClosedChannelException instead of security exception
+        //in that case, execution is repeated once again because probability of failing twice in row is << 0,01%
+        // in case that ClosedChannelException is happening regularly, it will end with this exception also in second run
+        for(int i = 0;i<2;i++) {
+
+            final long startTime = System.currentTimeMillis();
+            try {
+                executeWhoAmI(withTls);
+                fail(message);
+            } catch (IOException | GeneralSecurityException e) {
+                assertTrue("Connection reached its timeout (hang).",
+                        startTime + CONNECTION_TIMEOUT_IN_MS > System.currentTimeMillis());
+                Throwable cause = e.getCause();
+                assertThat("ConnectionException was expected as a cause when authentication fails", cause,
+                        is(instanceOf(ConnectException.class)));
+                //if execution ends with ClosedChannelException during first run, run once again
+                if(i == 0 && cause.getCause() instanceof ClosedChannelException) {
+                    LOGGER.warn("ClosedChannelException detected, probably because of bug in sslEngine. Because this is happening very rarely, second execution is started");
+                    continue;
+                }
+                assertThat("Unexpected type of inherited exception for authentication failure", cause.getCause(),
+                        anyOf(is(instanceOf(SSLException.class)), is(instanceOf(SaslException.class)),
+                                is(instanceOf(RedirectException.class))));
+            }
+            //if execution succeeds, there is no need to run another one
+            break;
         }
     }
 
